@@ -25,6 +25,7 @@ parser.add_argument('--epochs', type=int, default=25)
 parser.add_argument('--num_workers', type=int, default=1)
 parser.add_argument('--batch_size', type=int, default=1)
 parser.add_argument('--learning_rate', type=float, default=0.01)
+parser.add_argument('--weight_decay', type=float, default=1e-4)
 parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--model', type=str, default="resnet50")
 args = parser.parse_args()
@@ -80,7 +81,7 @@ def make_data_loaders():
     }
 
 
-def train_model(model, criterion, optimizer, scheduler, epochs):
+def train_resnet(model, criterion, optimizer, scheduler, epochs):
     since = time.time()
 
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -162,6 +163,102 @@ def train_model(model, criterion, optimizer, scheduler, epochs):
     return model
 
 
+def train_chexnet(model, criterion, optimizer, epochs, learning_rate, weight_decay):
+    since = time.time()
+
+    best_model_wts = copy.deepcopy(model.state_dict())
+    start_epoch = 1
+    best_loss = 999999
+    best_epoch = -1
+    last_train_loss = -1
+
+    # iterate over epochs
+    for epoch in range(start_epoch, epochs + 1):
+        print('Epoch {}/{}'.format(epoch, epochs))
+        print('-' * 10)
+
+        # set model to train or eval mode based on whether we are in train or
+        # val; necessary to get correct predictions given batchnorm
+        for phase in ['train', 'val']:
+            if phase == 'train':
+                model.train(True)
+            else:
+                model.train(False)
+
+            running_loss = 0.0
+
+            i = 0
+            total_done = 0
+            # iterate over all data in train/val dataloader:
+            for inputs, labels in data_loaders[phase]:
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+
+                # zero the parameter gradients
+                optimizer.zero_grad()
+
+                # forward
+                # track history if only in train
+                with torch.set_grad_enabled(phase == 'train'):
+                    outputs = model(inputs)
+                    _, preds = torch.max(outputs, 1)
+                    loss = criterion(outputs, labels)
+
+                    # backward + optimize only if in training phase
+                    if phase == 'train':
+                        loss.backward()
+                        optimizer.step()
+
+                # statistics
+                running_loss += loss.item() * inputs.size(0)
+
+            epoch_loss = running_loss / dataset_sizes[phase]
+
+            if phase == 'train':
+                last_train_loss = epoch_loss
+
+            print(phase + ' epoch {}:loss {:.4f} with data size {}'.format(
+                epoch, epoch_loss, dataset_sizes[phase]))
+
+            # decay learning rate if no val loss improvement in this epoch
+
+            if phase == 'val' and epoch_loss > best_loss:
+                print("decay loss from " + str(learning_rate) + " to " +
+                      str(learning_rate / 10) + " as not seeing improvement in val loss")
+                learning_rate = learning_rate / 10
+                # create new optimizer with lower learning rate
+                optimizer = optim.SGD(
+                    filter(
+                        lambda p: p.requires_grad,
+                        model.parameters()),
+                    lr=learning_rate,
+                    momentum=0.9,
+                    weight_decay=weight_decay)
+                print("created new optimizer with LR " + str(learning_rate))
+
+            # Check if model has best val loss yet
+            if phase == 'val' and epoch_loss < best_loss:
+                best_loss = epoch_loss
+                best_epoch = epoch
+                best_model_wts = copy.deepcopy(model.state_dict())
+
+            # log training and validation loss over each epoch
+            print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, last_train_loss, epoch_loss))
+
+        # break if no val loss improvement in 3 epochs
+        if (epoch - best_epoch) >= 3:
+            print("no improvement in 3 epochs, break")
+            break
+
+    time_elapsed = time.time() - since
+    print('Training complete in {:.0f}m {:.0f}s'.format(
+        time_elapsed // 60, time_elapsed % 60))
+
+    # load best model weights to return
+    model.load_state_dict(best_model_wts)
+    return model
+
+
 def predict_model(model):
     was_training = model.training
     model.eval()
@@ -176,7 +273,7 @@ def predict_model(model):
     predictions = predictions.astype(int)
     print('Test Dataset Predictions: ' + str(predictions))
     file_path = os.path.join("predictions",
-                        args.model + "_" + str(datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")) + ".csv")
+                             args.model + "_" + str(datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")) + ".csv")
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, "w", newline='') as csv_file:
         writer = csv.writer(csv_file, delimiter=',')
@@ -187,27 +284,29 @@ def predict_model(model):
 
 
 def main():
-    if args.model == "resnet18":
-        model, model_criterion, model_optimizer, model_scheduler = models.resnet(18, args.learning_rate,
-                                                                                 args.momentum)
-    elif args.model == "resnet50":
-        model, model_criterion, model_optimizer, model_scheduler = models.resnet(50, args.learning_rate,
-                                                                                 args.momentum)
-    elif args.model == "resnet101":
-        model, model_criterion, model_optimizer, model_scheduler = models.resnet(101, args.learning_rate,
-                                                                                 args.momentum)
-    elif args.model == "resnet152":
-        model, model_criterion, model_optimizer, model_scheduler = models.resnet(152, args.learning_rate,
-                                                                                 args.momentum)
+    if "resnet" in args.model:
+        if args.model == "resnet18":
+            model, model_criterion, model_optimizer, model_scheduler = models.resnet(18, args.learning_rate,
+                                                                                     args.momentum)
+        elif args.model == "resnet101":
+            model, model_criterion, model_optimizer, model_scheduler = models.resnet(101, args.learning_rate,
+                                                                                     args.momentum)
+        elif args.model == "resnet152":
+            model, model_criterion, model_optimizer, model_scheduler = models.resnet(152, args.learning_rate,
+                                                                                     args.momentum)
+        else:
+            print("Using default resnet model: resnet50")
+            model, model_criterion, model_optimizer, model_scheduler = models.resnet(50, args.learning_rate,
+                                                                                     args.momentum)
+        model = train_resnet(model, model_criterion, model_optimizer, model_scheduler, epochs=args.epochs)
+        predict_model(model)
     elif args.model == "chexnet":
-        model, model_criterion, model_optimizer, model_scheduler = models.resnet(152, args.learning_rate,
-                                                                                 args.momentum)
+        model, model_criterion, model_optimizer = models.chexnet(args.learning_rate, args.momentum, args.weight_decay)
+        model = train_chexnet(model, model_criterion, model_optimizer, epochs=args.epochs,
+                              learning_rate=args.learning_rate, weight_decay=args.weight_decay)
+        predict_model(model)
     else:
-        model, model_criterion, model_optimizer, model_scheduler = models.resnet(50, args.learning_rate,
-                                                                                 args.momentum)
-
-    model = train_model(model, model_criterion, model_optimizer, model_scheduler, epochs=args.epochs)
-    predict_model(model)
+        print("Please input a valid model")
 
 
 if __name__ == '__main__':

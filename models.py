@@ -1,3 +1,6 @@
+import time
+import copy
+
 import torch.nn as nn
 import torch
 from torch import optim
@@ -33,6 +36,7 @@ def resnet(layers=50, learning_rate=0.01, momentum=0.9):
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer_conv, step_size=7, gamma=0.1)
     return model_conv, criterion, optimizer_conv, exp_lr_scheduler
 
+
 # Code derived from https://github.com/jrzech/reproduce-chexnet/blob/master/model.py
 def chexnet(learning_rate=0.01, momentum=0.9, weight_decay=1e-4):
     model = models.densenet121(pretrained=True)
@@ -44,7 +48,8 @@ def chexnet(learning_rate=0.01, momentum=0.9, weight_decay=1e-4):
         nn.Linear(num_ftrs, N_LABELS),
         nn.Sigmoid())
     model = model.to(device)
-    criterion = nn.BCELoss()
+    # TODO: Changed from BCELoss to CrossEntropyLoss
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(
         filter(
             lambda p: p.requires_grad,
@@ -52,3 +57,5 @@ def chexnet(learning_rate=0.01, momentum=0.9, weight_decay=1e-4):
         lr=learning_rate,
         momentum=momentum,
         weight_decay=weight_decay)
+
+    return model, criterion, optimizer
