@@ -1,10 +1,12 @@
+import csv
+import datetime
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
 import numpy as np
 import torchvision
-from torchvision import datasets, models, transforms
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 import matplotlib.pyplot as plt
 import time
@@ -13,6 +15,7 @@ import copy
 import pandas as pd
 import pickle
 import argparse
+import models
 
 plt.ion()  # interactive mode
 
@@ -23,7 +26,7 @@ parser.add_argument('--num_workers', type=int, default=1)
 parser.add_argument('--batch_size', type=int, default=1)
 parser.add_argument('--learning_rate', type=float, default=0.01)
 parser.add_argument('--momentum', type=float, default=0.9)
-parser.add_argument('--layers', type=float, default=50)
+parser.add_argument('--model', type=str, default="resnet50")
 args = parser.parse_args()
 
 
@@ -75,32 +78,6 @@ def make_data_loaders():
         "val": DataLoader(validation_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers),
         "test": DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers),
     }
-
-
-# ConvNet as fixed feature extractor
-def create_resnet():
-    if args.layers == 18:
-        model_conv = models.resnet18(pretrained=True)
-    elif args.layers == 101:
-        model_conv = models.resnet101(pretrained=True)
-    elif args.layers == 152:
-        model_conv = models.resnet152(pretrained=True)
-    else:
-        model_conv = models.resnet50(pretrained=True)
-
-    # Freeze all the network except the final layer.
-    # Freeze the parameters so that the gradients are not computed in backward().
-    for param in model_conv.parameters():
-        param.requires_grad = False
-    num_ftrs = model_conv.fc.in_features
-    model_conv.fc = nn.Linear(num_ftrs, 2)
-    model_conv = model_conv.to(device)
-    criterion = nn.CrossEntropyLoss()
-    # Only parameters of final layer are being optimized
-    optimizer_conv = optim.SGD(model_conv.fc.parameters(), lr=args.learning_rate, momentum=args.momentum)
-    # Decay LR by a factor of 0.1 every 7 epochs
-    exp_lr_scheduler = lr_scheduler.StepLR(optimizer_conv, step_size=7, gamma=0.1)
-    return model_conv, criterion, optimizer_conv, exp_lr_scheduler
 
 
 def train_model(model, criterion, optimizer, scheduler, epochs):
@@ -196,10 +173,43 @@ def predict_model(model):
             _, preds = torch.max(outputs, 1)
             predictions = np.concatenate([predictions, preds.cpu().numpy()])
         model.train(mode=was_training)
+    predictions = predictions.astype(int)
     print('Test Dataset Predictions: ' + str(predictions))
+    file_path = os.path.join("predictions",
+                        args.model + "_" + str(datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")) + ".csv")
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, "w", newline='') as csv_file:
+        writer = csv.writer(csv_file, delimiter=',')
+        writer.writerow(["Id", "Predicted"])
+        for i in range(len(predictions)):
+            result = "True" if predictions[i] else "False"
+            writer.writerow([i, result])
 
 
-# Code derived from https://github.com/pytorch/tutorials/blob/master/beginner_source/transfer_learning_tutorial.py
+def main():
+    if args.model == "resnet18":
+        model, model_criterion, model_optimizer, model_scheduler = models.resnet(18, args.learning_rate,
+                                                                                 args.momentum)
+    elif args.model == "resnet50":
+        model, model_criterion, model_optimizer, model_scheduler = models.resnet(50, args.learning_rate,
+                                                                                 args.momentum)
+    elif args.model == "resnet101":
+        model, model_criterion, model_optimizer, model_scheduler = models.resnet(101, args.learning_rate,
+                                                                                 args.momentum)
+    elif args.model == "resnet152":
+        model, model_criterion, model_optimizer, model_scheduler = models.resnet(152, args.learning_rate,
+                                                                                 args.momentum)
+    elif args.model == "chexnet":
+        model, model_criterion, model_optimizer, model_scheduler = models.resnet(152, args.learning_rate,
+                                                                                 args.momentum)
+    else:
+        model, model_criterion, model_optimizer, model_scheduler = models.resnet(50, args.learning_rate,
+                                                                                 args.momentum)
+
+    model = train_model(model, model_criterion, model_optimizer, model_scheduler, epochs=args.epochs)
+    predict_model(model)
+
+
 if __name__ == '__main__':
     train_imgs = pickle.load(open("data/train_images_512.pk", 'rb'), encoding='bytes')
     train_labels = pickle.load(open("data/train_labels_512.pk", 'rb'), encoding='bytes')
@@ -214,6 +224,4 @@ if __name__ == '__main__':
     class_names = ['covid', 'background']
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    resNet, model_criterion, model_optimizer, model_scheduler = create_resnet()
-    resNet = train_model(resNet, model_criterion, model_optimizer, model_scheduler, epochs=args.epochs)
-    predict_model(resNet)
+    main()
