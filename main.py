@@ -1,21 +1,17 @@
 import csv
 import datetime
-
 import torch
-import torch.nn as nn
 import torch.optim as optim
-from torch.optim import lr_scheduler
 import numpy as np
-import torchvision
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
-from torchvision import datasets, transforms
+from torchvision.transforms import transforms
 import matplotlib.pyplot as plt
 import time
 import os
 import copy
-import pandas as pd
 import pickle
 import argparse
+
 import models
 
 plt.ion()  # interactive mode
@@ -398,7 +394,36 @@ if __name__ == '__main__':
     train_labels = pickle.load(open("data/train_labels_512.pk", 'rb'), encoding='bytes')
     test_imgs = pickle.load(open("data/test_images_512.pk", 'rb'), encoding='bytes')
 
+    data_transforms = {
+        'train': transforms.Compose([
+            transforms.RandomHorizontalFlip(),
+            transforms.Resize(224),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+        'test': transforms.Compose([
+            transforms.Resize(224),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+    }
+
+    transformed_train_imgs = torch.tensor([])
+    for i, img in enumerate(train_imgs):
+        PILImage = transforms.ToPILImage()(-img * 255)
+        transformed_train_imgs = torch.cat(
+            (transformed_train_imgs, data_transforms['train'](PILImage).clone().detach().unsqueeze(0)))
+
+    transformed_test_imgs = torch.tensor([])
+    for i, img in enumerate(test_imgs):
+        PILImage = transforms.ToPILImage()(-img * 255)
+        transformed_test_imgs = torch.cat(
+            (transformed_test_imgs, data_transforms['test'](PILImage).clone().detach().unsqueeze(0)))
+
     data_loaders = make_data_loaders()
+
     dataset_sizes = {'train': int(len(data_loaders['train'].dataset)),
                      'val': int(len(data_loaders['val'].dataset)),
                      'test': len(data_loaders['test'].dataset)}
