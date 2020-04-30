@@ -230,7 +230,7 @@ def train_chexnet(model, criterion, optimizer, epochs, learning_rate, weight_dec
                         lambda p: p.requires_grad,
                         model.parameters()),
                     lr=learning_rate,
-                    momentum=0.9,
+                    momentum=args.momentum,
                     weight_decay=weight_decay)
                 print("created new optimizer with LR " + str(learning_rate))
 
@@ -256,7 +256,7 @@ def train_chexnet(model, criterion, optimizer, epochs, learning_rate, weight_dec
     model.load_state_dict(best_model_wts)
     return model
 
-def train_model(model, criterion, optimizer, num_epochs=25, is_inception=False):
+def train_squeezenet(model, criterion, optimizer, num_epochs=args.epochs, is_inception=False):
     since = time.time()
 
     val_acc_history = []
@@ -383,7 +383,7 @@ def main():
         predict_model(model)
     elif args.model == "squeezenet":
         model, model_criterion, model_optimizer = models.squeezenet(args.learning_rate, args.momentum, args.weight_decay)
-        model = train_model(model, model_criterion, model_optimizer, num_epochs=args.epochs)
+        model = train_squeezenet(model, model_criterion, model_optimizer, num_epochs=args.epochs)
         predict_model(model)
     else:
         print("Please input a valid model")

@@ -1,18 +1,8 @@
-import time
-import copy
-
 import torch.nn as nn
 import torch
 from torch import optim
 from torch.optim import lr_scheduler
 from torchvision import models
-
-import h5py
-from keras.models import Model
-from keras.layers import Input, Activation, Concatenate
-from keras.layers import Flatten, Dropout
-from keras.layers import Convolution2D, MaxPooling2D
-from keras.layers import GlobalAveragePooling2D
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -55,7 +45,6 @@ def chexnet(learning_rate=0.01, momentum=0.9, weight_decay=1e-4):
         nn.Linear(num_ftrs, N_LABELS),
         nn.Sigmoid())
     model = model.to(device)
-    # TODO: Changed from BCELoss to CrossEntropyLoss
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(
         filter(
