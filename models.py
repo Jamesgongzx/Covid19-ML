@@ -7,6 +7,13 @@ from torch import optim
 from torch.optim import lr_scheduler
 from torchvision import models
 
+import h5py
+from keras.models import Model
+from keras.layers import Input, Activation, Concatenate
+from keras.layers import Flatten, Dropout
+from keras.layers import Convolution2D, MaxPooling2D
+from keras.layers import GlobalAveragePooling2D
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
@@ -59,3 +66,24 @@ def chexnet(learning_rate=0.01, momentum=0.9, weight_decay=1e-4):
         weight_decay=weight_decay)
 
     return model, criterion, optimizer
+
+#https://pytorch.org/tutorials/beginner/finetuning_torchvision_models_tutorial.html
+def squeezenet(learning_rate=0.001, momentum=0.9, weight_decay=1e-4):
+    model = models.squeezenet1_1(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    # re-initialize Conv2d layer to have an output feature map of depth 2
+    model.classifier[1] = nn.Conv2d(512, 2, kernel_size=(1,1), stride=(1,1))
+    model = model.to(device) # send model to GPU
+    # get parameters to update
+    params_to_update = []
+    for name,param in model.named_parameters():
+        if param.requires_grad == True:
+            params_to_update.append(param)
+    # create the optimizer
+    optimizer = optim.SGD(params_to_update, lr=learning_rate, momentum=momentum, weight_decay=weight_decay)
+    # loss functin
+    criterion = nn.CrossEntropyLoss()
+    return model, criterion, optimizer
+
+
